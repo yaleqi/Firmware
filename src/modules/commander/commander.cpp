@@ -513,9 +513,11 @@ bool handle_command(struct vehicle_status_s *status, const struct safety_s *safe
 		}
 
 	case VEHICLE_CMD_COMPONENT_ARM_DISARM: {
-			transition_result_t arming_res = TRANSITION_NOT_CHANGED;
 
 			if (!armed->armed && ((int)(cmd->param1 + 0.5f)) == 1) {
+
+				transition_result_t arming_res = TRANSITION_NOT_CHANGED;
+
 				if (safety->safety_switch_available && !safety->safety_off) {
 					print_reject_arm("NOT ARMING: Press safety switch first.");
 					arming_res = TRANSITION_DENIED;
