@@ -501,7 +501,7 @@ MPU6000::init()
 		_accel_topic = orb_advertise(ORB_ID(sensor_accel), &arp);
 
 		if (_accel_topic < 0)
-			debug("failed to create sensor_accel publication");
+			debug("accel pub fail");
 
 	}
 
@@ -514,7 +514,7 @@ MPU6000::init()
 		_gyro->_gyro_topic = orb_advertise(ORB_ID(sensor_gyro), &grp);
 
 		if (_gyro->_gyro_topic < 0)
-			debug("failed to create sensor_gyro publication");
+			debug("gyro pub fail");
 
 	}
 
