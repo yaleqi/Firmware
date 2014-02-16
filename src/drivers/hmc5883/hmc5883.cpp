@@ -322,8 +322,9 @@ HMC5883::HMC5883(int bus) :
 	_reports(nullptr),
 	_range_scale(0), /* default range scale from counts to gauss */
 	_range_ga(1.3f),
-	_mag_topic(-1),
+	_collect_phase(false),
 	_class_instance(-1),
+	_mag_topic(-1),
 	_sample_perf(perf_alloc(PC_ELAPSED, "hmc5883_read")),
 	_comms_errors(perf_alloc(PC_COUNT, "hmc5883_comms_errors")),
 	_buffer_overflows(perf_alloc(PC_COUNT, "hmc5883_buffer_overflows")),
@@ -700,7 +701,7 @@ HMC5883::reset()
 void
 HMC5883::cycle_trampoline(void *arg)
 {
-	HMC5883 *dev = (HMC5883 *)arg;
+	HMC5883 *dev = static_cast<HMC5883 *>(arg);
 
 	dev->cycle();
 }
@@ -782,7 +783,7 @@ HMC5883::collect()
 	struct {
 		int16_t		x, y, z;
 	} report;
-	int	ret = -EIO;
+	int	ret;
 	uint8_t	cmd;
 
 
@@ -1007,9 +1008,9 @@ int HMC5883::calibrate(struct file *filp, unsigned enable)
 				fabsf(expected_cal[1] / report.y), 
 				fabsf(expected_cal[2] / report.z)};
 
-		if (cal[0] > 0.7f && cal[0] < 1.35f &&
-		    cal[1] > 0.7f && cal[1] < 1.35f &&
-		    cal[2] > 0.7f && cal[2] < 1.35f) {
+		if ((cal[0] > 0.7f) && (cal[0] < 1.35f) &&
+		    (cal[1] > 0.7f) && (cal[1] < 1.35f) &&
+		    (cal[2] > 0.7f) && (cal[2] < 1.35f)) {
 			good_count++;
 			sum_excited[0] += cal[0];
 			sum_excited[1] += cal[1];
@@ -1224,7 +1225,7 @@ HMC5883::print_info()
 	printf("offsets (%.2f %.2f %.2f)\n", (double)_scale.x_offset, (double)_scale.y_offset, (double)_scale.z_offset);
 	printf("scaling (%.2f %.2f %.2f) 1/range_scale %.2f range_ga %.2f\n", 
 	       (double)_scale.x_scale, (double)_scale.y_scale, (double)_scale.z_scale,
-	       (double)1.0/_range_scale, (double)_range_ga);
+	       (double)(1.0f/_range_scale), (double)_range_ga);
 	_reports->print_info("report queue");
 }
 

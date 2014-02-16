@@ -936,7 +936,7 @@ MPU6000::ioctl(struct file *filp, int cmd, unsigned long arg)
 			/* copy scale, but only if off by a few percent */
 			struct accel_scale *s = (struct accel_scale *) arg;
 			float sum = s->x_scale + s->y_scale + s->z_scale;
-			if (sum > 2.0f && sum < 4.0f) {
+			if ((sum > 2.0f) && (sum < 4.0f)) {
 				memcpy(&_accel_scale, s, sizeof(_accel_scale));
 				return OK;
 			} else {
@@ -1374,7 +1374,7 @@ MPU6000_gyro::init()
 	/* if probe/setup failed, bail now */
 	if (ret != OK) {
 		debug("gyro init failed");
-		return ret;
+		goto out;
 	}
 
 	_gyro_class_instance = register_class_devname(GYRO_DEVICE_PATH);
@@ -1473,7 +1473,7 @@ test()
 	int fd = open(MPU_DEVICE_PATH_ACCEL, O_RDONLY);
 
 	if (fd < 0)
-		err(1, "%s open failed (try 'mpu6000 start' if the driver is not running)",
+		err(1, "%s open failed (try 'mpu6000 start')",
 		    MPU_DEVICE_PATH_ACCEL);
 
 	/* get the driver */

@@ -782,7 +782,7 @@ L3GD20::reset()
 void
 L3GD20::measure_trampoline(void *arg)
 {
-	L3GD20 *dev = (L3GD20 *)arg;
+	L3GD20 *dev = static_cast<L3GD20 *>(arg);
 
 	/* make another measurement */
 	dev->measure();
@@ -1009,7 +1009,7 @@ fail:
 void
 test()
 {
-	int fd_gyro = -1;
+	int fd_gyro;
 	struct gyro_report g_report;
 	ssize_t sz;
 

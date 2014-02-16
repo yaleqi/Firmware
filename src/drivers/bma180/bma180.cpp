@@ -660,7 +660,7 @@ BMA180::stop()
 void
 BMA180::measure_trampoline(void *arg)
 {
-	BMA180 *dev = (BMA180 *)arg;
+	BMA180 *dev = static_cast<BMA180 *>(arg);
 
 	/* make another measurement */
 	dev->measure();
@@ -808,7 +808,7 @@ fail:
 void
 test()
 {
-	int fd = -1;
+	int fd;
 	struct accel_report a_report;
 	ssize_t sz;
 
