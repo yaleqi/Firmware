@@ -174,6 +174,8 @@ typedef enum {
 	LOW_PRIO_TASK_AIRSPEED_CALIBRATION
 } low_prio_task_t;
 
+static const char *main_states_str[MAIN_STATE_MAX] = {"MANUAL", "ALTCTL", "POSCTL", "AUTO"};
+
 static low_prio_task_t low_prio_task = LOW_PRIO_TASK_NONE;
 
 /**
@@ -362,7 +364,7 @@ void print_status()
 	close(state_sub);
 
 
-	warnx("arming: %s", armed_str);
+	warnx("main: %s, arming: %s", main_states_str[state.main_state], armed_str);
 }
 
 static orb_advert_t status_pub;
@@ -646,12 +648,6 @@ int commander_thread_main(int argc, char *argv[])
 
 	/* welcome user */
 	warnx("starting");
-
-	char *main_states_str[MAIN_STATE_MAX];
-	main_states_str[0] = "MANUAL";
-	main_states_str[1] = "ALTCTL";
-	main_states_str[2] = "POSCTL";
-	main_states_str[3] = "AUTO";
 
 	char *arming_states_str[ARMING_STATE_MAX];
 	arming_states_str[0] = "INIT";
