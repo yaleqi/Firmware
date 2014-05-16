@@ -974,23 +974,23 @@ void AttPosEKF::CovariancePrediction(float dt)
 
     if (onGround || staticMode) {
         // copy the portion of the variances we want to
-        // propagate
+        // propagate across the diagonal
         for (unsigned i = 0; i <= 13; i++) {
             P[i][i] = nextP[i][i];
+        }
 
-            // force symmetry for observable states
-            // force zero for non-observable states
-            for (unsigned i = 1; i < n_states; i++)
+        // force symmetry for observable states
+        // force zero for non-observable states
+        for (unsigned i = 1; i < n_states; i++)
+        {
+            for (uint8_t j = 0; j < i; j++)
             {
-                for (uint8_t j = 0; j < i; j++)
-                {
-                    if ((i > 13) || (j > 13)) {
-                        P[i][j] = 0.0f;
-                    } else {
-                        P[i][j] = 0.5f * (nextP[i][j] + nextP[j][i]);
-                    }
-                    P[j][i] = P[i][j];
+                if ((i > 13) || (j > 13)) {
+                    P[i][j] = 0.0f;
+                } else {
+                    P[i][j] = 0.5f * (nextP[i][j] + nextP[j][i]);
                 }
+                P[j][i] = P[i][j];
             }
         }
 
@@ -1178,7 +1178,7 @@ void AttPosEKF::FuseVelposNED()
                 stateIndex = 4 + obsIndex;
                 // Calculate the measurement innovation, using states from a
                 // different time coordinate if fusing height data
-                if (obsIndex >= 0 && obsIndex <= 2)
+                if (obsIndex <= 2)
                 {
                     innovVelPos[obsIndex] = statesAtVelTime[stateIndex] - observation[obsIndex];
                 }
@@ -1193,7 +1193,7 @@ void AttPosEKF::FuseVelposNED()
                 // Calculate the Kalman Gain
                 // Calculate innovation variances - also used for data logging
                 varInnovVelPos[obsIndex] = P[stateIndex][stateIndex] + R_OBS[obsIndex];
-                SK = 1.0/varInnovVelPos[obsIndex];
+                SK = 1.0f/varInnovVelPos[obsIndex];
                 for (uint8_t i= 0; i<=indexLimit; i++)
                 {
                     Kfusion[i] = P[i][stateIndex]*SK;
@@ -1508,7 +1508,7 @@ void AttPosEKF::FuseMagnetometer()
         }
 
         // Check the innovation for consistency and don't fuse if > 5Sigma
-        if ((innovMag[obsIndex]*innovMag[obsIndex]/varInnovMag[obsIndex]) < 25.0)
+        if ((innovMag[obsIndex]*innovMag[obsIndex]/varInnovMag[obsIndex]) < 25.0f)
         {
             // correct the state vector
             for (uint8_t j= 0; j < indexLimit; j++)
@@ -1517,7 +1517,7 @@ void AttPosEKF::FuseMagnetometer()
             }
             // normalise the quaternion states
             float quatMag = sqrt(states[0]*states[0] + states[1]*states[1] + states[2]*states[2] + states[3]*states[3]);
-            if (quatMag > 1e-12)
+            if (quatMag > 1e-12f)
             {
                 for (uint8_t j= 0; j<=3; j++)
                 {
@@ -1661,7 +1661,7 @@ void AttPosEKF::FuseAirspeed()
         // Calculate the measurement innovation
         innovVtas = VtasPred - VtasMeas;
         // Check the innovation for consistency and don't fuse if > 5Sigma
-        if ((innovVtas*innovVtas*SK_TAS) < 25.0)
+        if ((innovVtas*innovVtas*SK_TAS) < 25.0f)
         {
             // correct the state vector
             for (uint8_t j=0; j <= 22; j++)
@@ -1758,7 +1758,7 @@ void AttPosEKF::FuseRangeFinder()
 
     // Need to check that our range finder tilt angle is less than 30 degrees and we are using range finder data
     SH_RNG[4] = sin(rngFinderPitch);
-    cosRngTilt = - Tbn.z.x * SH_RNG[4] + Tbn.z.z * cos(rngFinderPitch);
+    cosRngTilt = - Tbn.z.x * SH_RNG[4] + Tbn.z.z * cosf(rngFinderPitch);
     if (useRangeFinder && cosRngTilt > 0.87f)
     {
         // Calculate observation jacobian and Kalman gain ignoring all states other than the terrain offset
@@ -1853,23 +1853,23 @@ int AttPosEKF::RecallStates(float* statesForFusion, uint64_t msec)
 {
     int ret = 0;
 
-    int64_t bestTimeDelta = 200;
+    uint64_t bestTimeDelta = 200;
     unsigned bestStoreIndex = 0;
-    for (unsigned storeIndex = 0; storeIndex < data_buffer_size; storeIndex++)
+    for (unsigned sIndex = 0; sIndex < data_buffer_size; sIndex++)
     {
         // Work around a GCC compiler bug - we know 64bit support on ARM is
         // sketchy in GCC.
-        uint64_t timeDelta;
+        int64_t timeDelta;
 
-        if (msec > statetimeStamp[storeIndex]) {
-            timeDelta = msec - statetimeStamp[storeIndex];
+        if (msec > statetimeStamp[sIndex]) {
+            timeDelta = msec - statetimeStamp[sIndex];
         } else {
-            timeDelta = statetimeStamp[storeIndex] - msec;
+            timeDelta = statetimeStamp[sIndex] - msec;
         }
 
         if (timeDelta < bestTimeDelta)
         {
-            bestStoreIndex = storeIndex;
+            bestStoreIndex = sIndex;
             bestTimeDelta = timeDelta;
         }
     }
@@ -1926,7 +1926,7 @@ void AttPosEKF::quat2Tnb(Mat3f &Tnb, const float (&quat)[4])
     Tnb.y.z = 2*(q23 + q01);
 }
 
-void AttPosEKF::quat2Tbn(Mat3f &Tbn, const float (&quat)[4])
+void AttPosEKF::quat2Tbn(Mat3f &Tb, const float (&quat)[4])
 {
     // Calculate the body to nav cosine matrix
     float q00 = sq(quat[0]);
@@ -1940,15 +1940,15 @@ void AttPosEKF::quat2Tbn(Mat3f &Tbn, const float (&quat)[4])
     float q13 =  quat[1]*quat[3];
     float q23 =  quat[2]*quat[3];
 
-    Tbn.x.x = q00 + q11 - q22 - q33;
-    Tbn.y.y = q00 - q11 + q22 - q33;
-    Tbn.z.z = q00 - q11 - q22 + q33;
-    Tbn.x.y = 2*(q12 - q03);
-    Tbn.x.z = 2*(q13 + q02);
-    Tbn.y.x = 2*(q12 + q03);
-    Tbn.y.z = 2*(q23 - q01);
-    Tbn.z.x = 2*(q13 - q02);
-    Tbn.z.y = 2*(q23 + q01);
+    Tb.x.x = q00 + q11 - q22 - q33;
+    Tb.y.y = q00 - q11 + q22 - q33;
+    Tb.z.z = q00 - q11 - q22 + q33;
+    Tb.x.y = 2*(q12 - q03);
+    Tb.x.z = 2*(q13 + q02);
+    Tb.y.x = 2*(q12 + q03);
+    Tb.y.z = 2*(q23 - q01);
+    Tb.z.x = 2*(q13 - q02);
+    Tb.z.y = 2*(q23 + q01);
 }
 
 void AttPosEKF::eul2quat(float (&quat)[4], const float (&eul)[3])
@@ -1986,12 +1986,12 @@ void AttPosEKF::calcposNED(float (&posNED)[3], double lat, double lon, float hgt
     posNED[2] = -(hgt - hgtRef);
 }
 
-void AttPosEKF::calcLLH(float (&posNED)[3], float lat, float lon, float hgt, float latRef, float lonRef, float hgtRef)
-{
-    lat = latRef + posNED[0] * earthRadiusInv;
-    lon = lonRef + posNED[1] * earthRadiusInv / cos(latRef);
-    hgt = hgtRef - posNED[2];
-}
+// void AttPosEKF::calcLLH(float (&posNED)[3], float lat, float lon, float hgt, float latRef, float lonRef, float hgtRef)
+// {
+//     lat = latRef + posNED[0] * earthRadiusInv;
+//     lon = lonRef + posNED[1] * earthRadiusInv / cos(latRef);
+//     hgt = hgtRef - posNED[2];
+// }
 
 void AttPosEKF::OnGroundCheck()
 {
@@ -2042,10 +2042,10 @@ float AttPosEKF::ConstrainFloat(float val, float min, float max)
     float ret;
     if (val > max) {
         ret = max;
-        ekf_debug("> max: %8.4f, val: %8.4f", max, val);
+        ekf_debug("> max: %8.4f, val: %8.4f", (double)max, (double)val);
     } else if (val < min) {
         ret = min;
-        ekf_debug("< min: %8.4f, val: %8.4f", min, val);
+        ekf_debug("< min: %8.4f, val: %8.4f", (double)min, (double)val);
     } else {
         ret = val;
     }
