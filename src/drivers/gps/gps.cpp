@@ -357,23 +357,22 @@ GPS::task_main()
 					}
 
 					if (!_healthy) {
-						char *mode_str = "unknown";
 
 						switch (_mode) {
 						case GPS_DRIVER_MODE_UBX:
-							mode_str = "UBX";
+							warnx("UBX detected");
+							_healthy = true;
 							break;
 
 						case GPS_DRIVER_MODE_MTK:
-							mode_str = "MTK";
+							warnx("MTK detected");
+							_healthy = true;
 							break;
 
 						default:
 							break;
 						}
 
-						warnx("module found: %s", mode_str);
-						_healthy = true;
 					}
 				}
 
@@ -449,9 +448,9 @@ GPS::print_info()
 
 	if (_report.timestamp_position != 0) {
 		warnx("position lock: %dD, satellites: %d, last update: %fms ago", (int)_report.fix_type,
-				_report.satellites_visible, (hrt_absolute_time() - _report.timestamp_position) / 1000.0f);
+				_report.satellites_visible, (double)((hrt_absolute_time() - _report.timestamp_position) / 1000.0f));
 		warnx("lat: %d, lon: %d, alt: %d", _report.lat, _report.lon, _report.alt);
-		warnx("eph: %.2fm, epv: %.2fm", _report.eph_m, _report.epv_m);
+		warnx("eph: %.2fm, epv: %.2fm", (double)_report.eph_m, (double)_report.epv_m);
 		warnx("rate position: \t%6.2f Hz", (double)_Helper->get_position_update_rate());
 		warnx("rate velocity: \t%6.2f Hz", (double)_Helper->get_velocity_update_rate());
 		warnx("rate publication:\t%6.2f Hz", (double)_rate);
@@ -578,7 +577,7 @@ gps_main(int argc, char *argv[])
 {
 
 	/* set to default */
-	char *device_name = GPS_DEFAULT_UART_PORT;
+	char *device_name = 0;
 	bool fake_gps = false;
 
 	/*
@@ -601,7 +600,7 @@ gps_main(int argc, char *argv[])
 				fake_gps = true;
 		}
 
-		gps::start(device_name, fake_gps);
+		gps::start(((device_name) ? device_name : GPS_DEFAULT_UART_PORT), fake_gps);
 	}
 
 	if (!strcmp(argv[1], "stop"))
