@@ -645,6 +645,35 @@ FixedwingEstimator::task_main()
 				continue;
 			}
 
+			/* handle HIL position resets gracefully */
+			if (_vstatus.hil_state == HIL_STATE_ON && _gps_initialized) {
+				float x, y;
+				map_projection_project(&_pos_ref, _global_pos.lat, _global_pos.lon, &x, &y);
+
+				float dx = _local_pos.x - x;
+				float dy = _local_pos.y - y;
+
+				if (sqrtf(dx*dx + dy*dy) > 20) {
+					/* force filter to re-initialize */
+					_gyro_valid = false;
+					_accel_valid = false;
+					_mag_valid = false;
+
+					_baro_init = false;
+					_gps_initialized = false;
+					last_sensor_timestamp = hrt_absolute_time();
+					last_run = last_sensor_timestamp;
+
+					_ekf->ZeroVariables();
+					_ekf->dtIMU = 0.01f;
+					_filter_start_time = last_sensor_timestamp;
+
+					/* now skip this loop and get data on the next one, which will also re-init the filter */
+					continue;
+				}
+
+			}
+
 			/**
 			 *    PART ONE: COLLECT ALL DATA
 			 **/
