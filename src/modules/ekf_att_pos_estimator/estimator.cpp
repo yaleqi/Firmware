@@ -978,19 +978,20 @@ void AttPosEKF::CovariancePrediction(float dt)
         for (unsigned i = 0; i <= 13; i++) {
             P[i][i] = nextP[i][i];
 
-            // force symmetry for observable states
-            // force zero for non-observable states
-            for (unsigned i = 1; i < n_states; i++)
+        }
+
+        // force symmetry for observable states
+        // force zero for non-observable states
+        for (unsigned i = 1; i < n_states; i++)
+        {
+            for (uint8_t j = 0; j < i; j++)
             {
-                for (uint8_t j = 0; j < i; j++)
-                {
-                    if ((i > 13) || (j > 13)) {
-                        P[i][j] = 0.0f;
-                    } else {
-                        P[i][j] = 0.5f * (nextP[i][j] + nextP[j][i]);
-                    }
-                    P[j][i] = P[i][j];
+                if ((i > 13) || (j > 13)) {
+                    P[i][j] = 0.0f;
+                } else {
+                    P[i][j] = 0.5f * (nextP[i][j] + nextP[j][i]);
                 }
+                P[j][i] = P[i][j];
             }
         }
 
@@ -1190,18 +1191,21 @@ void AttPosEKF::FuseVelposNED()
                 {
                     innovVelPos[obsIndex] = statesAtHgtTime[stateIndex] - observation[obsIndex];
                 }
+
                 // Calculate the Kalman Gain
                 // Calculate innovation variances - also used for data logging
                 varInnovVelPos[obsIndex] = P[stateIndex][stateIndex] + R_OBS[obsIndex];
-                SK = 1.0/varInnovVelPos[obsIndex];
-                for (uint8_t i= 0; i<=indexLimit; i++)
+                SK = 1.0f/varInnovVelPos[obsIndex];
+                for (uint8_t i= 0; i<=12; i++)
                 {
                     Kfusion[i] = P[i][stateIndex]*SK;
                 }
 
                 // Don't update Z accel bias state unless using a height observation (GPS velocities can be biased)
-                if (obsIndex != 5) {
-                    Kfusion[13] = 0;
+                if (obsIndex == 5 && Tnb.z.z > 0.5f) {
+                    Kfusion[13] = ConstrainFloat(P[13][stateIndex]*SK, -1.0f, 0.0f);
+                } else {
+                    Kfusion[13] = 0.0f;
                 }
 
                 // Calculate state corrections and re-normalise the quaternions
