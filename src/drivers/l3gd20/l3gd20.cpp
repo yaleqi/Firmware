@@ -991,7 +991,7 @@ start()
 		errx(0, "already started");
 
 	/* create the driver */
-	g_dev = new L3GD20(PX4_SPI_BUS_SENSORS, L3GD20_DEVICE_PATH, (spi_dev_e)PX4_SPIDEV_GYRO);
+	g_dev = new L3GD20(4, L3GD20_DEVICE_PATH, (spi_dev_e)PX4_SPIDEV_EXT0);
 
 	if (g_dev == nullptr)
 		goto fail;
