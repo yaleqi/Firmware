@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2016 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,22 +39,93 @@
  * @author Thomas Gubler <thomasgubler@gmail.com>
  */
 
-#include <nuttx/config.h>
-
-#include <systemlib/param/param.h>
-
 /*
  * Geofence parameters, accessible via MAVLink
  */
 
 /**
- * Enable geofence.
+ * Geofence violation action.
  *
- * Set to 1 to enable geofence.
- * Defaults to 1 because geofence is only enabled when the geofence.txt file is present.
+ * Note: Setting this value to 4 enables flight termination,
+ * which will kill the vehicle on violation of the fence.
+ * Due to the inherent danger of this, this function is
+ * disabled using a software circuit breaker, which needs
+ * to be reset to 0 to really shut down the system.
+ *
+ * @min 0
+ * @max 4
+ * @value 0 None
+ * @value 1 Warning
+ * @value 2 Loiter
+ * @value 3 Return to Land
+ * @value 4 Flight terminate
+ * @group Geofence
+ */
+PARAM_DEFINE_INT32(GF_ACTION, 1);
+
+/**
+ * Geofence altitude mode
+ *
+ * Select which altitude reference should be used
+ * 0 = WGS84, 1 = AMSL
  *
  * @min 0
  * @max 1
+ * @value 0 WGS84
+ * @value 1 AMSL
  * @group Geofence
  */
-PARAM_DEFINE_INT32(GF_ON, 1);
+PARAM_DEFINE_INT32(GF_ALTMODE, 0);
+
+/**
+ * Geofence source
+ *
+ * Select which position source should be used. Selecting GPS instead of global position makes sure that there is
+ * no dependence on the position estimator
+ * 0 = global position, 1 = GPS
+ *
+ * @min 0
+ * @max 1
+ * @value 0 GPOS
+ * @value 1 GPS
+ * @group Geofence
+ */
+PARAM_DEFINE_INT32(GF_SOURCE, 0);
+
+/**
+ * Geofence counter limit
+ *
+ * Set how many subsequent position measurements outside of the fence are needed before geofence violation is triggered
+ *
+ * @min -1
+ * @max 10
+ * @increment 1
+ * @group Geofence
+ */
+PARAM_DEFINE_INT32(GF_COUNT, -1);
+
+/**
+ * Max horizontal distance in meters.
+ *
+ * Maximum horizontal distance in meters the vehicle can be from home before triggering a geofence action. Disabled if 0.
+ *
+ * @unit m
+ * @min 0
+ * @max 10000
+ * @increment 1
+ * @group Geofence
+ */
+PARAM_DEFINE_FLOAT(GF_MAX_HOR_DIST, 0);
+
+/**
+ * Max vertical distance in meters.
+ *
+ * Maximum vertical distance in meters the vehicle can be from home before triggering a geofence action. Disabled if 0.
+ *
+ * @unit m
+ * @min 0
+ * @max 10000
+ * @increment 1
+ * @group Geofence
+ */
+PARAM_DEFINE_FLOAT(GF_MAX_VER_DIST, 0);

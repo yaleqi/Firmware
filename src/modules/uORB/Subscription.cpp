@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2017 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,67 +37,72 @@
  */
 
 #include "Subscription.hpp"
-#include "topics/parameter_update.h"
-#include "topics/actuator_controls.h"
-#include "topics/vehicle_gps_position.h"
-#include "topics/sensor_combined.h"
-#include "topics/vehicle_attitude.h"
-#include "topics/vehicle_global_position.h"
-#include "topics/encoders.h"
-#include "topics/position_setpoint_triplet.h"
-#include "topics/vehicle_status.h"
-#include "topics/manual_control_setpoint.h"
-#include "topics/vehicle_local_position_setpoint.h"
-#include "topics/vehicle_local_position.h"
-#include "topics/vehicle_attitude_setpoint.h"
-#include "topics/vehicle_rates_setpoint.h"
+#include <px4_defines.h>
 
 namespace uORB
 {
 
-bool __EXPORT SubscriptionBase::updated()
+SubscriptionBase::SubscriptionBase(const struct orb_metadata *meta, unsigned interval, unsigned instance) :
+	_meta(meta),
+	_instance(instance)
+{
+	if (instance > 0) {
+		_handle = orb_subscribe_multi(_meta, instance);
+
+	} else {
+		_handle = orb_subscribe(_meta);
+	}
+
+	if (_handle < 0) {
+		PX4_ERR("%s sub failed", _meta->o_name);
+	}
+
+	if (interval > 0) {
+		orb_set_interval(_handle, interval);
+	}
+}
+
+bool SubscriptionBase::updated()
 {
 	bool isUpdated = false;
-	orb_check(_handle, &isUpdated);
+
+	if (orb_check(_handle, &isUpdated) != PX4_OK) {
+		PX4_ERR("%s check failed", _meta->o_name);
+	}
+
 	return isUpdated;
 }
 
-template<class T>
-Subscription<T>::Subscription(
-	List<SubscriptionBase *> * list,
-	const struct orb_metadata *meta, unsigned interval) :
-	T(), // initialize data structure to zero
-	SubscriptionBase(list, meta) {
-	setHandle(orb_subscribe(getMeta()));
-	orb_set_interval(getHandle(), interval);
+bool SubscriptionBase::update(void *data)
+{
+	bool orb_updated = false;
+
+	if (updated()) {
+		if (orb_copy(_meta, _handle, data) != PX4_OK) {
+			PX4_ERR("%s copy failed", _meta->o_name);
+
+		} else {
+			orb_updated = true;
+		}
+	}
+
+	return orb_updated;
 }
 
-template<class T>
-Subscription<T>::~Subscription() {}
-
-template<class T>
-void * Subscription<T>::getDataVoidPtr() {
-	return (void *)(T *)(this);
+SubscriptionBase::~SubscriptionBase()
+{
+	if (orb_unsubscribe(_handle) != PX4_OK) {
+		PX4_ERR("%s unsubscribe failed", _meta->o_name);
+	}
 }
 
-template<class T>
-T Subscription<T>::getData() {
-	return T(*this);
+SubscriptionNode::SubscriptionNode(const struct orb_metadata *meta, unsigned interval, unsigned instance,
+				   List<SubscriptionNode *> *list)
+	: SubscriptionBase(meta, interval, instance)
+{
+	if (list != nullptr) {
+		list->add(this);
+	}
 }
-
-template class __EXPORT Subscription<parameter_update_s>;
-template class __EXPORT Subscription<actuator_controls_s>;
-template class __EXPORT Subscription<vehicle_gps_position_s>;
-template class __EXPORT Subscription<sensor_combined_s>;
-template class __EXPORT Subscription<vehicle_attitude_s>;
-template class __EXPORT Subscription<vehicle_global_position_s>;
-template class __EXPORT Subscription<encoders_s>;
-template class __EXPORT Subscription<position_setpoint_triplet_s>;
-template class __EXPORT Subscription<vehicle_status_s>;
-template class __EXPORT Subscription<manual_control_setpoint_s>;
-template class __EXPORT Subscription<vehicle_local_position_setpoint_s>;
-template class __EXPORT Subscription<vehicle_local_position_s>;
-template class __EXPORT Subscription<vehicle_attitude_setpoint_s>;
-template class __EXPORT Subscription<vehicle_rates_setpoint_s>;
 
 } // namespace uORB

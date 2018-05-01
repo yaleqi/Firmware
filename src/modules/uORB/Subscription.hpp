@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2017 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,7 +32,7 @@
  ****************************************************************************/
 
 /**
- * @file Subscription.h
+ * @file Subscription.hpp
  *
  */
 
@@ -40,89 +40,154 @@
 
 #include <uORB/uORB.h>
 #include <containers/List.hpp>
-
+#include <systemlib/err.h>
+#include <px4_defines.h>
 
 namespace uORB
 {
 
 /**
- * Base subscription warapper class, used in list traversal
+ * Base subscription wrapper class, used in list traversal
  * of various subscriptions.
  */
-class __EXPORT SubscriptionBase :
-	public ListNode<SubscriptionBase *>
+class __EXPORT SubscriptionBase
 {
 public:
-// methods
-
 	/**
 	 * Constructor
 	 *
-	 * @param meta		The uORB metadata (usually from the ORB_ID() macro)
-	 *			for the topic.
+	 * @param meta The uORB metadata (usually from the ORB_ID()
+	 * 	macro) for the topic.
+	 * @param interval  The minimum interval in milliseconds
+	 * 	between updates
+	 * @param instance The instance for multi sub.
 	 */
-	SubscriptionBase(
-		List<SubscriptionBase *> * list,
-		const struct orb_metadata *meta) :
-		_meta(meta),
-		_handle() {
-		if (list != NULL) list->add(this);
-	}
+	SubscriptionBase(const struct orb_metadata *meta, unsigned interval = 0, unsigned instance = 0);
+	virtual ~SubscriptionBase();
+
+	// no copy, assignment, move, move assignment
+	SubscriptionBase(const SubscriptionBase &) = delete;
+	SubscriptionBase &operator=(const SubscriptionBase &) = delete;
+	SubscriptionBase(SubscriptionBase &&) = delete;
+	SubscriptionBase &operator=(SubscriptionBase &&) = delete;
+
+	/**
+	 * Check if there is a new update.
+	 * */
 	bool updated();
-	void update() {
-		if (updated()) {
-			orb_copy(_meta, _handle, getDataVoidPtr());
-		}
-	}
-	virtual void *getDataVoidPtr() = 0;
-	virtual ~SubscriptionBase() {
-		orb_unsubscribe(_handle);
-	}
-// accessors
-	const struct orb_metadata *getMeta() { return _meta; }
-	int getHandle() { return _handle; }
+
+	/**
+	 * Update the struct
+	 * @param data The uORB message struct we are updating.
+	 */
+	bool update(void *data);
+
+	int getHandle() const { return _handle; }
+
+	const orb_metadata *getMeta() const { return _meta; }
+
+	unsigned getInstance() const { return _instance; }
+
 protected:
-// accessors
-	void setHandle(int handle) { _handle = handle; }
-// attributes
 	const struct orb_metadata *_meta;
+	unsigned _instance;
 	int _handle;
+};
+
+/**
+ * alias class name so it is clear that the base class
+ */
+typedef SubscriptionBase SubscriptionTiny;
+
+/**
+ * The subscription base class as a list node.
+ */
+class __EXPORT SubscriptionNode : public SubscriptionBase, public ListNode<SubscriptionNode *>
+{
+public:
+	/**
+	 * Constructor
+	 *
+	 * @param meta The uORB metadata (usually from the ORB_ID()
+	 * 	macro) for the topic.
+	 * @param interval  The minimum interval in milliseconds
+	 * 	between updates
+	 * @param instance The instance for multi sub.
+	 * @param list 	A pointer to a list of subscriptions
+	 * 	that this should be appended to.
+	 */
+	SubscriptionNode(const struct orb_metadata *meta, unsigned interval = 0, unsigned instance = 0,
+			 List<SubscriptionNode *> *list = nullptr);
+
+	virtual ~SubscriptionNode() override = default;
+
+	/**
+	 * This function is the callback for list traversal
+	 * updates, a child class must implement it.
+	 */
+	virtual bool update() = 0;
+
+	/**
+	 * Like update(), but does not check first if there is data available
+	 */
+	virtual bool forcedUpdate() = 0;
+
 };
 
 /**
  * Subscription wrapper class
  */
 template<class T>
-class __EXPORT Subscription :
-	public T, // this must be first!
-	public SubscriptionBase
+class __EXPORT Subscription : public SubscriptionNode
 {
 public:
 	/**
 	 * Constructor
 	 *
-	 * @param list      A list interface for adding to list during construction
-	 * @param meta		The uORB metadata (usually from the ORB_ID() macro)
-	 *			for the topic.
-	 * @param interval  The minimum interval in milliseconds between updates
+	 * @param meta The uORB metadata (usually from
+	 * 	the ORB_ID() macro) for the topic.
+	 * @param interval  The minimum interval in milliseconds
+	 * 	between updates
+	 * @param list A list interface for adding to
+	 * 	list during construction
 	 */
-	Subscription(
-		List<SubscriptionBase *> * list,
-		const struct orb_metadata *meta, unsigned interval);
+	Subscription(const struct orb_metadata *meta, unsigned interval = 0, unsigned instance = 0,
+		     List<SubscriptionNode *> *list = nullptr):
+		SubscriptionNode(meta, interval, instance, list),
+		_data() // initialize data structure to zero
+	{}
+
+	~Subscription() override = default;
+
+	// no copy, assignment, move, move assignment
+	Subscription(const Subscription &) = delete;
+	Subscription &operator=(const Subscription &) = delete;
+	Subscription(Subscription &&) = delete;
+	Subscription &operator=(Subscription &&) = delete;
+
 	/**
-	 * Deconstructor
+	 * Create an update function that uses the embedded struct.
 	 */
-	virtual ~Subscription();
+	bool update() override
+	{
+		return SubscriptionBase::update((void *)(&_data));
+	}
+
+	bool forcedUpdate() override
+	{
+		return orb_copy(_meta, _handle, &_data) == PX4_OK;
+	}
 
 	/*
-	 * XXX
-	 * This function gets the T struct, assuming
-	 * the struct is the first base class, this
-	 * should use dynamic cast, but doesn't
-	 * seem to be available
-	 */
-	void *getDataVoidPtr();
-	T getData();
+	 * This function gets the T struct data
+	 * */
+	const T &get() const
+	{
+		return _data;
+	}
+
+private:
+	T _data;
 };
 
 } // namespace uORB

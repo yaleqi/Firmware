@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2012 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2017 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,44 +37,63 @@
  */
 
 #include "Publication.hpp"
-#include "topics/vehicle_attitude.h"
-#include "topics/vehicle_local_position.h"
-#include "topics/vehicle_global_position.h"
-#include "topics/debug_key_value.h"
-#include "topics/actuator_controls.h"
-#include "topics/vehicle_global_velocity_setpoint.h"
-#include "topics/vehicle_attitude_setpoint.h"
-#include "topics/vehicle_rates_setpoint.h"
-#include "topics/actuator_outputs.h"
-#include "topics/encoders.h"
+#include <px4_defines.h>
 
-namespace uORB {
+namespace uORB
+{
 
-template<class T>
-Publication<T>::Publication(
-	List<PublicationBase *> * list,
-	const struct orb_metadata *meta) :
-	T(), // initialize data structure to zero
-	PublicationBase(list, meta) {
+PublicationBase::PublicationBase(const struct orb_metadata *meta, int priority) :
+	_meta(meta),
+	_priority(priority)
+{
 }
 
-template<class T>
-Publication<T>::~Publication() {}
-
-template<class T>
-void * Publication<T>::getDataVoidPtr() {
-	return (void *)(T *)(this);
+PublicationBase::~PublicationBase()
+{
+	orb_unadvertise(_handle);
 }
 
-template class __EXPORT Publication<vehicle_attitude_s>;
-template class __EXPORT Publication<vehicle_local_position_s>;
-template class __EXPORT Publication<vehicle_global_position_s>;
-template class __EXPORT Publication<debug_key_value_s>;
-template class __EXPORT Publication<actuator_controls_s>;
-template class __EXPORT Publication<vehicle_global_velocity_setpoint_s>;
-template class __EXPORT Publication<vehicle_attitude_setpoint_s>;
-template class __EXPORT Publication<vehicle_rates_setpoint_s>;
-template class __EXPORT Publication<actuator_outputs_s>;
-template class __EXPORT Publication<encoders_s>;
+bool PublicationBase::update(void *data)
+{
+	bool updated = false;
 
+	if (_handle != nullptr) {
+		if (orb_publish(_meta, _handle, data) != PX4_OK) {
+			PX4_ERR("%s publish fail", _meta->o_name);
+
+		} else {
+			updated = true;
+		}
+
+	} else {
+		orb_advert_t handle = nullptr;
+
+		if (_priority > 0) {
+			int instance;
+			handle = orb_advertise_multi(_meta, data, &instance, _priority);
+
+		} else {
+			handle = orb_advertise(_meta, data);
+		}
+
+		if (handle != nullptr) {
+			_handle = handle;
+			updated = true;
+
+		} else {
+			PX4_ERR("%s advert fail", _meta->o_name);
+		}
+	}
+
+	return updated;
 }
+
+PublicationNode::PublicationNode(const struct orb_metadata *meta, int priority, List<PublicationNode *> *list) :
+	PublicationBase(meta, priority)
+{
+	if (list != nullptr) {
+		list->add(this);
+	}
+}
+
+}  // namespace uORB

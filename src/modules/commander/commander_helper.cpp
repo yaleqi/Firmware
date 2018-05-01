@@ -1,9 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (C) 2013 PX4 Development Team. All rights reserved.
- *   Author: Thomas Gubler <thomasgubler@student.ethz.ch>
- *           Julian Oes <joes@student.ethz.ch>
- *           Anton Babushkin <anton.babushkin@me.com>
+ *   Copyright (c) 2013, 2014 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,8 +34,15 @@
 /**
  * @file commander_helper.cpp
  * Commander helper functions implementations
+ *
+ * @author Thomas Gubler <thomasgubler@student.ethz.ch>
+ * @author Julian Oes <julian@oes.ch>
+ * @author Anton Babushkin <anton.babushkin@me.com>
+ *
  */
 
+#include <px4_defines.h>
+#include <px4_posix.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <stdint.h>
@@ -51,22 +55,33 @@
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/actuator_controls.h>
 #include <uORB/topics/vehicle_control_mode.h>
+#include <uORB/topics/led_control.h>
+#include <uORB/topics/tune_control.h>
 #include <systemlib/err.h>
-#include <systemlib/param/param.h>
+#include <parameters/param.h>
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_tone_alarm.h>
-#include <drivers/drv_led.h>
-#include <drivers/drv_rgbled.h>
 
 #include "commander_helper.h"
+#include "DevMgr.hpp"
 
-/* oddly, ERROR is not defined for c++ */
-#ifdef ERROR
-# undef ERROR
-#endif
-static const int ERROR = -1;
+using namespace DriverFramework;
 
-#define BLINK_MSG_TIME	700000	// 3 fast blinks
+#define VEHICLE_TYPE_QUADROTOR 2
+#define VEHICLE_TYPE_COAXIAL 3
+#define VEHICLE_TYPE_HELICOPTER 4
+#define VEHICLE_TYPE_HEXAROTOR 13
+#define VEHICLE_TYPE_OCTOROTOR 14
+#define VEHICLE_TYPE_TRICOPTER 15
+#define VEHICLE_TYPE_VTOL_DUOROTOR 19
+#define VEHICLE_TYPE_VTOL_QUADROTOR 20
+#define VEHICLE_TYPE_VTOL_TILTROTOR 21
+#define VEHICLE_TYPE_VTOL_RESERVED2 22
+#define VEHICLE_TYPE_VTOL_RESERVED3 23
+#define VEHICLE_TYPE_VTOL_RESERVED4 24
+#define VEHICLE_TYPE_VTOL_RESERVED5 25
+
+#define BLINK_MSG_TIME	700000	// 3 fast blinks (in us)
 
 bool is_multirotor(const struct vehicle_status_s *current_status)
 {
@@ -79,14 +94,30 @@ bool is_multirotor(const struct vehicle_status_s *current_status)
 bool is_rotary_wing(const struct vehicle_status_s *current_status)
 {
 	return is_multirotor(current_status) || (current_status->system_type == VEHICLE_TYPE_HELICOPTER)
-	       || (current_status->system_type == VEHICLE_TYPE_COAXIAL);
+		   || (current_status->system_type == VEHICLE_TYPE_COAXIAL);
 }
 
-static int buzzer = -1;
+bool is_vtol(const struct vehicle_status_s * current_status) {
+	return (current_status->system_type == VEHICLE_TYPE_VTOL_DUOROTOR ||
+		current_status->system_type == VEHICLE_TYPE_VTOL_QUADROTOR ||
+		current_status->system_type == VEHICLE_TYPE_VTOL_TILTROTOR ||
+		current_status->system_type == VEHICLE_TYPE_VTOL_RESERVED2 ||
+		current_status->system_type == VEHICLE_TYPE_VTOL_RESERVED3 ||
+		current_status->system_type == VEHICLE_TYPE_VTOL_RESERVED4 ||
+		current_status->system_type == VEHICLE_TYPE_VTOL_RESERVED5);
+}
+
 static hrt_abstime blink_msg_end = 0;	// end time for currently blinking LED message, 0 if no blink message
 static hrt_abstime tune_end = 0;		// end time of currently played tune, 0 for repeating tunes or silence
 static int tune_current = TONE_STOP_TUNE;		// currently playing tune, can be interrupted after tune_end
 static unsigned int tune_durations[TONE_NUMBER_OF_TUNES];
+
+static DevHandle h_leds;
+static DevHandle h_buzzer;
+static led_control_s led_control = {};
+static orb_advert_t led_control_pub = nullptr;
+static tune_control_s tune_control = {};
+static orb_advert_t tune_control_pub = nullptr;
 
 int buzzer_init()
 {
@@ -97,20 +128,22 @@ int buzzer_init()
 	tune_durations[TONE_NOTIFY_NEGATIVE_TUNE] = 900000;
 	tune_durations[TONE_NOTIFY_NEUTRAL_TUNE] = 500000;
 	tune_durations[TONE_ARMING_WARNING_TUNE] = 3000000;
-
-	buzzer = open(TONEALARM_DEVICE_PATH, O_WRONLY);
-
-	if (buzzer < 0) {
-		warnx("Buzzer: open fail\n");
-		return ERROR;
-	}
-
-	return OK;
+	tune_control_pub = orb_advertise(ORB_ID(tune_control), &tune_control);
+	return PX4_OK;
 }
 
 void buzzer_deinit()
 {
-	close(buzzer);
+	orb_unadvertise(tune_control_pub);
+}
+
+void set_tune_override(int tune)
+{
+	tune_control.tune_id = tune;
+	tune_control.strength = tune_control_s::STRENGTH_NORMAL;
+	tune_control.tune_override = 1;
+	tune_control.timestamp = hrt_absolute_time();
+	orb_publish(ORB_ID(tune_control), tune_control_pub, &tune_control);
 }
 
 void set_tune(int tune)
@@ -121,7 +154,11 @@ void set_tune(int tune)
 	if (tune_end == 0 || new_tune_duration != 0 || hrt_absolute_time() > tune_end) {
 		/* allow interrupting current non-repeating tune by the same tune */
 		if (tune != tune_current || new_tune_duration != 0) {
-			ioctl(buzzer, TONE_SET_ALARM, tune);
+			tune_control.tune_id = tune;
+			tune_control.strength = tune_control_s::STRENGTH_NORMAL;
+			tune_control.tune_override = 0;
+			tune_control.timestamp = hrt_absolute_time();
+			orb_publish(ORB_ID(tune_control), tune_control_pub, &tune_control);
 		}
 
 		tune_current = tune;
@@ -135,14 +172,43 @@ void set_tune(int tune)
 	}
 }
 
+void tune_home_set(bool use_buzzer)
+{
+	blink_msg_end = hrt_absolute_time() + BLINK_MSG_TIME;
+	rgbled_set_color_and_mode(led_control_s::COLOR_GREEN, led_control_s::MODE_BLINK_FAST);
+
+	if (use_buzzer) {
+		set_tune(TONE_HOME_SET);
+	}
+}
+
+void tune_mission_ok(bool use_buzzer)
+{
+	blink_msg_end = hrt_absolute_time() + BLINK_MSG_TIME;
+	rgbled_set_color_and_mode(led_control_s::COLOR_GREEN, led_control_s::MODE_BLINK_FAST);
+
+	if (use_buzzer) {
+		set_tune(TONE_NOTIFY_NEUTRAL_TUNE);
+	}
+}
+
+void tune_mission_fail(bool use_buzzer)
+{
+	blink_msg_end = hrt_absolute_time() + BLINK_MSG_TIME;
+	rgbled_set_color_and_mode(led_control_s::COLOR_GREEN, led_control_s::MODE_BLINK_FAST);
+
+	if (use_buzzer) {
+		set_tune(TONE_NOTIFY_NEGATIVE_TUNE);
+	}
+}
+
 /**
  * Blink green LED and play positive tune (if use_buzzer == true).
  */
 void tune_positive(bool use_buzzer)
 {
 	blink_msg_end = hrt_absolute_time() + BLINK_MSG_TIME;
-	rgbled_set_color(RGBLED_COLOR_GREEN);
-	rgbled_set_mode(RGBLED_MODE_BLINK_FAST);
+	rgbled_set_color_and_mode(led_control_s::COLOR_GREEN, led_control_s::MODE_BLINK_FAST);
 
 	if (use_buzzer) {
 		set_tune(TONE_NOTIFY_POSITIVE_TUNE);
@@ -155,8 +221,7 @@ void tune_positive(bool use_buzzer)
 void tune_neutral(bool use_buzzer)
 {
 	blink_msg_end = hrt_absolute_time() + BLINK_MSG_TIME;
-	rgbled_set_color(RGBLED_COLOR_WHITE);
-	rgbled_set_mode(RGBLED_MODE_BLINK_FAST);
+	rgbled_set_color_and_mode(led_control_s::COLOR_WHITE, led_control_s::MODE_BLINK_FAST);
 
 	if (use_buzzer) {
 		set_tune(TONE_NOTIFY_NEUTRAL_TUNE);
@@ -169,11 +234,20 @@ void tune_neutral(bool use_buzzer)
 void tune_negative(bool use_buzzer)
 {
 	blink_msg_end = hrt_absolute_time() + BLINK_MSG_TIME;
-	rgbled_set_color(RGBLED_COLOR_RED);
-	rgbled_set_mode(RGBLED_MODE_BLINK_FAST);
+	rgbled_set_color_and_mode(led_control_s::COLOR_RED, led_control_s::MODE_BLINK_FAST);
 
 	if (use_buzzer) {
 		set_tune(TONE_NOTIFY_NEGATIVE_TUNE);
+	}
+}
+
+void tune_failsafe(bool use_buzzer)
+{
+	blink_msg_end = hrt_absolute_time() + BLINK_MSG_TIME;
+	rgbled_set_color_and_mode(led_control_s::COLOR_PURPLE, led_control_s::MODE_BLINK_FAST);
+
+	if (use_buzzer) {
+		set_tune(TONE_BATTERY_WARNING_FAST_TUNE);
 	}
 }
 
@@ -191,133 +265,77 @@ int blink_msg_state()
 	}
 }
 
-static int leds = -1;
-static int rgbleds = -1;
-
 int led_init()
 {
 	blink_msg_end = 0;
 
-	/* first open normal LEDs */
-	leds = open(LED_DEVICE_PATH, 0);
+	led_control.led_mask = 0xff;
+	led_control.mode = led_control_s::MODE_OFF;
+	led_control.priority = 0;
+	led_control.timestamp = hrt_absolute_time();
+	led_control_pub = orb_advertise_queue(ORB_ID(led_control), &led_control, LED_UORB_QUEUE_LENGTH);
 
-	if (leds < 0) {
-		warnx("LED: open fail\n");
-		return ERROR;
+#ifndef CONFIG_ARCH_BOARD_RPI
+	/* first open normal LEDs */
+	DevMgr::getHandle(LED0_DEVICE_PATH, h_leds);
+
+	if (!h_leds.isValid()) {
+		PX4_WARN("LED: getHandle fail\n");
+		return PX4_ERROR;
 	}
 
-	/* the blue LED is only available on FMUv1 & AeroCore but not FMUv2 */
-	(void)ioctl(leds, LED_ON, LED_BLUE);
+	/* the blue LED is only available on AeroCore but not FMUv2 */
+	(void)h_leds.ioctl(LED_ON, LED_BLUE);
+
+	/* switch blue off */
+	led_off(LED_BLUE);
 
 	/* we consider the amber led mandatory */
-	if (ioctl(leds, LED_ON, LED_AMBER)) {
-		warnx("Amber LED: ioctl fail\n");
-		return ERROR;
+	if (h_leds.ioctl(LED_ON, LED_AMBER)) {
+		PX4_WARN("Amber LED: ioctl fail\n");
+		return PX4_ERROR;
 	}
 
-	/* then try RGB LEDs, this can fail on FMUv1*/
-	rgbleds = open(RGBLED_DEVICE_PATH, 0);
-
-	if (rgbleds == -1) {
-		warnx("No RGB LED found at " RGBLED_DEVICE_PATH);
-	}
+	/* switch amber off */
+	led_off(LED_AMBER);
+#endif
 
 	return 0;
 }
 
 void led_deinit()
 {
-	close(leds);
-
-	if (rgbleds != -1) {
-		close(rgbleds);
-	}
+	orb_unadvertise(led_control_pub);
+#ifndef CONFIG_ARCH_BOARD_RPI
+	DevMgr::releaseHandle(h_leds);
+#endif
 }
 
 int led_toggle(int led)
 {
-	return ioctl(leds, LED_TOGGLE, led);
+	return h_leds.ioctl(LED_TOGGLE, led);
 }
 
 int led_on(int led)
 {
-	return ioctl(leds, LED_ON, led);
+	return h_leds.ioctl(LED_ON, led);
 }
 
 int led_off(int led)
 {
-	return ioctl(leds, LED_OFF, led);
+	return h_leds.ioctl(LED_OFF, led);
 }
 
-void rgbled_set_color(rgbled_color_t color)
+void rgbled_set_color_and_mode(uint8_t color, uint8_t mode, uint8_t blinks, uint8_t prio)
 {
-
-	if (rgbleds != -1) {
-		ioctl(rgbleds, RGBLED_SET_COLOR, (unsigned long)color);
-	}
+	led_control.mode = mode;
+	led_control.color = color;
+	led_control.num_blinks = blinks;
+	led_control.priority = prio;
+	led_control.timestamp = hrt_absolute_time();
+	orb_publish(ORB_ID(led_control), led_control_pub, &led_control);
 }
 
-void rgbled_set_mode(rgbled_mode_t mode)
-{
-
-	if (rgbleds != -1) {
-		ioctl(rgbleds, RGBLED_SET_MODE, (unsigned long)mode);
-	}
-}
-
-void rgbled_set_pattern(rgbled_pattern_t *pattern)
-{
-
-	if (rgbleds != -1) {
-		ioctl(rgbleds, RGBLED_SET_PATTERN, (unsigned long)pattern);
-	}
-}
-
-float battery_remaining_estimate_voltage(float voltage, float discharged)
-{
-	float ret = 0;
-	static param_t bat_v_empty_h;
-	static param_t bat_v_full_h;
-	static param_t bat_n_cells_h;
-	static param_t bat_capacity_h;
-	static float bat_v_empty = 3.2f;
-	static float bat_v_full = 4.0f;
-	static int bat_n_cells = 3;
-	static float bat_capacity = -1.0f;
-	static bool initialized = false;
-	static unsigned int counter = 0;
-
-	if (!initialized) {
-		bat_v_empty_h = param_find("BAT_V_EMPTY");
-		bat_v_full_h = param_find("BAT_V_FULL");
-		bat_n_cells_h = param_find("BAT_N_CELLS");
-		bat_capacity_h = param_find("BAT_CAPACITY");
-		initialized = true;
-	}
-
-	if (counter % 100 == 0) {
-		param_get(bat_v_empty_h, &bat_v_empty);
-		param_get(bat_v_full_h, &bat_v_full);
-		param_get(bat_n_cells_h, &bat_n_cells);
-		param_get(bat_capacity_h, &bat_capacity);
-	}
-
-	counter++;
-
-	/* remaining charge estimate based on voltage */
-	float remaining_voltage = (voltage - bat_n_cells * bat_v_empty) / (bat_n_cells * (bat_v_full - bat_v_empty));
-
-	if (bat_capacity > 0.0f) {
-		/* if battery capacity is known, use discharged current for estimate, but don't show more than voltage estimate */
-		ret = fminf(remaining_voltage, 1.0f - discharged / bat_capacity);
-
-	} else {
-		/* else use voltage */
-		ret = remaining_voltage;
-	}
-
-	/* limit to sane values */
-	ret = (ret < 0.0f) ? 0.0f : ret;
-	ret = (ret > 1.0f) ? 1.0f : ret;
-	return ret;
+void rgbled_set_color_and_mode(uint8_t color, uint8_t mode){
+	rgbled_set_color_and_mode(color, mode, 0, 0);
 }

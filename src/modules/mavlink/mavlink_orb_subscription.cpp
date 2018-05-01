@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2014 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2014, 2015 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -36,60 +36,71 @@
  * uORB subscription implementation.
  *
  * @author Anton Babushkin <anton.babushkin@me.com>
+ * @author Lorenz Meier <lorenz@px4.io>
  */
+
+#include "mavlink_orb_subscription.h"
 
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <uORB/uORB.h>
 #include <stdio.h>
 
-#include "mavlink_orb_subscription.h"
+#include <px4_defines.h>
+#include <uORB/uORB.h>
 
-MavlinkOrbSubscription::MavlinkOrbSubscription(const orb_id_t topic) :
-	_fd(orb_subscribe(_topic)),
-	_published(false),
+MavlinkOrbSubscription::MavlinkOrbSubscription(const orb_id_t topic, int instance) :
+	next(nullptr),
 	_topic(topic),
-	_last_check(0),
-	next(nullptr)
+	_fd(-1),
+	_instance(instance),
+	_published(false),
+	_subscribe_from_beginning(false),
+	_last_pub_check(0)
 {
-	_data = malloc(topic->o_size);
-	memset(_data, 0, topic->o_size);
 }
 
 MavlinkOrbSubscription::~MavlinkOrbSubscription()
 {
-	close(_fd);
-	free(_data);
+	if (_fd >= 0) {
+		orb_unsubscribe(_fd);
+	}
 }
 
 orb_id_t
-MavlinkOrbSubscription::get_topic()
+MavlinkOrbSubscription::get_topic() const
 {
 	return _topic;
 }
 
-void *
-MavlinkOrbSubscription::get_data()
+int
+MavlinkOrbSubscription::get_instance() const
 {
-	return _data;
+	return _instance;
 }
 
 bool
-MavlinkOrbSubscription::update(const hrt_abstime t)
+MavlinkOrbSubscription::update(uint64_t *time, void *data)
 {
-	if (_last_check == t) {
-		/* already checked right now, return result of the check */
-		return _updated;
+	// TODO this is NOT atomic operation, we can get data newer than time
+	// if topic was published between orb_stat and orb_copy calls.
 
-	} else {
-		_last_check = t;
-		orb_check(_fd, &_updated);
+	uint64_t time_topic;
 
-		if (_updated) {
-			orb_copy(_topic, _fd, _data);
-			_published = true;
+	if (orb_stat(_fd, &time_topic)) {
+		/* error getting last topic publication time */
+		time_topic = 0;
+	}
+
+	if (update(data)) {
+		/* data copied successfully */
+
+		if (time_topic == 0 || (time_topic != *time)) {
+			*time = time_topic;
 			return true;
+
+		} else {
+			return false;
 		}
 	}
 
@@ -97,10 +108,70 @@ MavlinkOrbSubscription::update(const hrt_abstime t)
 }
 
 bool
+MavlinkOrbSubscription::update(void *data)
+{
+	if (!is_published()) {
+		return false;
+	}
+
+	if (orb_copy(_topic, _fd, data) != PX4_OK) {
+		return false;
+	}
+
+	return true;
+}
+
+bool
+MavlinkOrbSubscription::update_if_changed(void *data)
+{
+	bool prevpub = _published;
+
+	if (!is_published()) {
+		return false;
+	}
+
+	bool updated;
+
+	if (orb_check(_fd, &updated)) {
+		return false;
+	}
+
+	// If we didn't update and this topic did not change
+	// its publication status then nothing really changed
+	if (!updated && prevpub == _published) {
+		return false;
+	}
+
+	return update(data);
+}
+
+bool
 MavlinkOrbSubscription::is_published()
 {
+	// If we marked it as published no need to check again
 	if (_published) {
 		return true;
+	}
+
+	hrt_abstime now = hrt_absolute_time();
+
+	if (now - _last_pub_check < 300000) {
+		return false;
+	}
+
+	// We are checking now
+	_last_pub_check = now;
+
+	// We don't want to subscribe to anything that does not exist
+	// in order to save memory and file descriptors.
+	// However, for some topics like vehicle_command_ack, we want to subscribe
+	// from the beginning in order not to miss the first publish respective advertise.
+	if (!_subscribe_from_beginning && orb_exists(_topic, _instance)) {
+		return false;
+	}
+
+	if (_fd < 0) {
+		_fd = orb_subscribe_multi(_topic, _instance);
 	}
 
 	bool updated;
@@ -110,5 +181,20 @@ MavlinkOrbSubscription::is_published()
 		_published = true;
 	}
 
+	// topic may have been last published before we subscribed
+	uint64_t time_topic = 0;
+
+	if (!_published && orb_stat(_fd, &time_topic) == PX4_OK) {
+		if (time_topic != 0) {
+			_published = true;
+		}
+	}
+
 	return _published;
+}
+
+void
+MavlinkOrbSubscription::subscribe_from_beginning(bool from_beginning)
+{
+	_subscribe_from_beginning = from_beginning;
 }

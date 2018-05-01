@@ -44,46 +44,8 @@
 #include "drv_sensor.h"
 #include "drv_orb_dev.h"
 
-#define RANGE_FINDER_DEVICE_PATH	"/dev/range_finder"
-
-enum RANGE_FINDER_TYPE {
-	RANGE_FINDER_TYPE_LASER = 0,
-};
-
-/**
- * range finder report structure.  Reads from the device must be in multiples of this
- * structure.
- */
-struct range_finder_report {
-	uint64_t timestamp;
-	uint64_t error_count;
-	unsigned type;				/**< type, following RANGE_FINDER_TYPE enum */
-	float distance; 			/**< in meters */
-	float minimum_distance;			/**< minimum distance the sensor can measure */
-	float maximum_distance;			/**< maximum distance the sensor can measure */
-	uint8_t valid;				/**< 1 == within sensor range, 0 = outside sensor range */
-};
-
-/*
- * ObjDev tag for raw range finder data.
- */
-ORB_DECLARE(sensor_range_finder);
-
-/*
- * ioctl() definitions
- *
- * Rangefinder drivers also implement the generic sensor driver
- * interfaces from drv_sensor.h
- */
-
-#define _RANGEFINDERIOCBASE			(0x7900)
-#define __RANGEFINDERIOC(_n)		(_IOC(_RANGEFINDERIOCBASE, _n))
-
-/** set the minimum effective distance of the device */
-#define RANGEFINDERIOCSETMINIUMDISTANCE	__RANGEFINDERIOC(1)
-
-/** set the maximum effective distance of the device */
-#define RANGEFINDERIOCSETMAXIUMDISTANCE	__RANGEFINDERIOC(2)
-
+#define RANGE_FINDER_BASE_DEVICE_PATH	"/dev/range_finder"
+#define RANGE_FINDER0_DEVICE_PATH	"/dev/range_finder0"
+#define MB12XX_MAX_RANGEFINDERS	12	// Maximum number of Maxbotix sensors on bus
 
 #endif /* _DRV_RANGEFINDER_H */

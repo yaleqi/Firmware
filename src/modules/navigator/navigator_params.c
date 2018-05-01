@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2014-2016 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -17,7 +17,7 @@
  *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * AS IS AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
  * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
  * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
@@ -34,104 +34,167 @@
 /**
  * @file navigator_params.c
  *
- * Parameters defined by the navigator task.
+ * Parameters for navigator in general
  *
- * @author Lorenz Meier <lm@inf.ethz.ch>
- * @author Julian Oes <joes@student.ethz.ch>
- * @author Anton Babushkin <anton.babushkin@me.com>
- */
-
-#include <nuttx/config.h>
-
-#include <systemlib/param/param.h>
-
-/*
- * Navigator parameters, accessible via MAVLink
+ * @author Julian Oes <julian@px4.io>
+ * @author Thomas Gubler <thomas@px4.io>
  */
 
 /**
- * Minimum altitude (fixed wing only)
+ * Loiter radius (FW only)
  *
- * Minimum altitude above home for LOITER.
+ * Default value of loiter radius for missions, loiter, RTL, etc. (fixedwing only).
  *
- * @unit meters
- * @group Navigation
- */
-PARAM_DEFINE_FLOAT(NAV_MIN_ALT, 50.0f);
-
-/**
- * Waypoint acceptance radius
- *
- * Default value of acceptance radius (if not specified in mission item).
- *
- * @unit meters
- * @min 0.0
- * @group Navigation
- */
-PARAM_DEFINE_FLOAT(NAV_ACCEPT_RAD, 10.0f);
-
-/**
- * Loiter radius (fixed wing only)
- *
- * Default value of loiter radius (if not specified in mission item).
- *
- * @unit meters
- * @min 0.0
- * @group Navigation
+ * @unit m
+ * @min 25
+ * @max 1000
+ * @decimal 1
+ * @increment 0.5
+ * @group Mission
  */
 PARAM_DEFINE_FLOAT(NAV_LOITER_RAD, 50.0f);
 
 /**
- * Enable onboard mission
+ * Acceptance Radius
  *
- * @group Navigation
+ * Default acceptance radius, overridden by acceptance radius of waypoint if set.
+ * For fixed wing the L1 turning distance is used for horizontal acceptance.
+ *
+ * @unit m
+ * @min 0.05
+ * @max 200.0
+ * @decimal 1
+ * @increment 0.5
+ * @group Mission
  */
-PARAM_DEFINE_INT32(NAV_ONB_MIS_EN, 0);
+PARAM_DEFINE_FLOAT(NAV_ACC_RAD, 10.0f);
 
 /**
- * Take-off altitude
+ * FW Altitude Acceptance Radius
  *
- * Even if first waypoint has altitude less then NAV_TAKEOFF_ALT above home position, system will climb to NAV_TAKEOFF_ALT on takeoff, then go to waypoint.
+ * Acceptance radius for fixedwing altitude.
  *
- * @unit meters
- * @group Navigation
+ * @unit m
+ * @min 0.05
+ * @max 200.0
+ * @decimal 1
+ * @increment 0.5
+ * @group Mission
  */
-PARAM_DEFINE_FLOAT(NAV_TAKEOFF_ALT, 10.0f);
+PARAM_DEFINE_FLOAT(NAV_FW_ALT_RAD, 10.0f);
 
 /**
- * Landing altitude
+ * MC Altitude Acceptance Radius
  *
- * Stay at this altitude above home position after RTL descending. Land (i.e. slowly descend) from this altitude if autolanding allowed.
+ * Acceptance radius for multicopter altitude.
  *
- * @unit meters
- * @group Navigation
+ * @unit m
+ * @min 0.05
+ * @max 200.0
+ * @decimal 1
+ * @increment 0.5
+ * @group Mission
  */
-PARAM_DEFINE_FLOAT(NAV_LAND_ALT, 5.0f);
+PARAM_DEFINE_FLOAT(NAV_MC_ALT_RAD, 0.8f);
 
 /**
- * Return-To-Launch altitude
+ * Set data link loss failsafe mode
  *
- * Minimum altitude above home position for going home in RTL mode.
+ * The data link loss failsafe will only be entered after a timeout,
+ * set by COM_DL_LOSS_T in seconds. Once the timeout occurs the selected
+ * action will be executed. Setting this parameter to 4 will enable CASA
+ * Outback Challenge rules, which are only recommended to participants
+ * of that competition.
  *
- * @unit meters
- * @group Navigation
+ * @value 0 Disabled
+ * @value 1 Loiter
+ * @value 2 Return to Land
+ * @value 3 Land at current position
+ * @value 4 Data Link Auto Recovery (CASA Outback Challenge rules)
+ * @value 5 Terminate
+ * @value 6 Lockdown
+ *
+ * @group Mission
  */
-PARAM_DEFINE_FLOAT(NAV_RTL_ALT, 30.0f);
+PARAM_DEFINE_INT32(NAV_DLL_ACT, 0);
 
 /**
- * Return-To-Launch delay
+ * Set RC loss failsafe mode
  *
- * Delay after descend before landing in RTL mode.
- * If set to -1 the system will not land but loiter at NAV_LAND_ALT.
+ * The RC loss failsafe will only be entered after a timeout,
+ * set by COM_RC_LOSS_T in seconds. If RC input checks have been disabled
+ * by setting the COM_RC_IN_MODE param it will not be triggered.
+ * Setting this parameter to 4 will enable CASA Outback Challenge rules,
+ * which are only recommended to participants of that competition.
  *
- * @unit seconds
- * @group Navigation
+ * @value 0 Disabled
+ * @value 1 Loiter
+ * @value 2 Return to Land
+ * @value 3 Land at current position
+ * @value 4 RC Auto Recovery (CASA Outback Challenge rules)
+ * @value 5 Terminate
+ * @value 6 Lockdown
+ *
+ * @group Mission
  */
-PARAM_DEFINE_FLOAT(NAV_RTL_LAND_T, -1.0f);
+PARAM_DEFINE_INT32(NAV_RCL_ACT, 2);
 
 /**
- * Enable parachute deployment
+ * Set traffic avoidance mode
  *
- * @group Navigation
+ * Enabling this will allow the system to respond
+ * to transponder data from e.g. ADSB transponders
+ *
+ * @value 0 Disabled
+ * @value 1 Warn only
+ * @value 2 Return to Land
+ * @value 3 Land immediately
+ *
+ * @group Mission
  */
-PARAM_DEFINE_INT32(NAV_PARACHUTE_EN, 0);
+PARAM_DEFINE_INT32(NAV_TRAFF_AVOID, 1);
+
+/**
+ * Airfield home Lat
+ *
+ * Latitude of airfield home waypoint
+ *
+ * @unit deg * 1e7
+ * @min -900000000
+ * @max 900000000
+ * @group Data Link Loss
+ */
+PARAM_DEFINE_INT32(NAV_AH_LAT, -265847810);
+
+/**
+ * Airfield home Lon
+ *
+ * Longitude of airfield home waypoint
+ *
+ * @unit deg * 1e7
+ * @min -1800000000
+ * @max 1800000000
+ * @group Data Link Loss
+ */
+PARAM_DEFINE_INT32(NAV_AH_LON, 1518423250);
+
+/**
+ * Airfield home alt
+ *
+ * Altitude of airfield home waypoint
+ *
+ * @unit m
+ * @min -50
+ * @decimal 1
+ * @increment 0.5
+ * @group Data Link Loss
+ */
+PARAM_DEFINE_FLOAT(NAV_AH_ALT, 600.0f);
+
+/**
+ * Force VTOL mode takeoff and land
+ *
+ * @boolean
+ * @group Mission
+ */
+PARAM_DEFINE_INT32(NAV_FORCE_VT, 1);
